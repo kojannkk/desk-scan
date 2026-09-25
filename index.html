@@ -77,7 +77,7 @@
       <div class="res info" id="res">箱に貼ったラベルのQRをカメラに向けてください</div>
     </div>
     <div class="card hidden" id="recvCard">
-      <h2>受付した封筒</h2>
+      <h2>記録した封筒</h2>
       <div class="muted" id="recvPending"></div>
       <div id="recvLog"></div>
     </div>
@@ -207,10 +207,10 @@ function begin() {
   $('scrScan').classList.remove('hidden');
   startCamera();
   if (queue.length) { $('recvCard').classList.remove('hidden'); flushQueue(); }
-  if (RECV) {
-    $('boxName').textContent = '返送受付';
+  if (MODE === 'recv' || MODE === 'ship') {
+    $('boxName').textContent = MODE === 'ship' ? '発送記録' : '返送受付';
     $('recvCard').classList.remove('hidden');
-    result('info', '届いた封筒の返信用ラベルのQRをかざしてください');
+    result('info', MODE === 'ship' ? '出す封筒の送付用ラベル（宛先がお客さん）のQRをかざしてください' : '届いた封筒の返信用ラベルのQRをかざしてください');
     return;
   }
   if (startBox && !(draft && draft.kubun === startBox.kubun && draft.year === startBox.year && draft.no === startBox.no)) {
@@ -258,7 +258,8 @@ function onScan(text) {
 
 // ---------- 返送受付（宛名ラベル） ----------
 // 1通読むごとにすぐ記録する。送れなかった分は端末に残して、あとで送り直す
-const RECV = new URLSearchParams(location.search).get('m') === 'recv';
+// ?m=recv → 返送受付、?m=ship → 発送記録 として開く（どちらでも送付用・返信用の両方を読める）
+const MODE = new URLSearchParams(location.search).get('m') || '';
 let queue = [];
 try { queue = JSON.parse(lsGet('deskScan.queue') || '[]'); } catch (e) { queue = []; }
 let flushing = false;
