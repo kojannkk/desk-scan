@@ -106,7 +106,22 @@
 //   Deskの場所（デプロイID）と合言葉は、Deskから開いたときの # で受け取り、この端末にだけ保存する。
 //   このページ自体には顧問先の情報もDeskのURLも入れていない。
 // ============================================================
-const KUBUN = { C: '法人', P: '個人' };
+const KUBUN = { C: '法人', P: '個人', S: '確定申告のみ', E: '終了顧問先', D: '顧問先専用' };
+// 箱の区分ごとに、入れてよい先か。法人・個人は顧問先の区分、確定申告のみはF列（か3000番台）、終了顧問先は関与していない先
+function boxAccepts(boxKubun, c, boxClient) {
+  if (boxKubun === 'D') return c.code === Number(boxClient);
+  if (boxKubun === 'E') return !c.active;
+  if (boxKubun === 'S') return !!c.kakuteiOnly;
+  return c.kubun === boxKubun;
+}
+function boxRejectMsg(boxKubun, c) {
+  const who = c.code + ' ' + c.name;
+  if (boxKubun === 'D') return who + ' はこの専用箱の顧問先ではないので入れていません';
+  if (boxKubun === 'E') return who + ' は関与中の先です。終了顧問先の箱なので入れていません';
+  if (boxKubun === 'S') return who + ' は確定申告のみの先ではありません。この箱は確定申告のみの箱なので入れていません';
+  return who + ' は' + KUBUN[c.kubun] + 'です。この箱は' + KUBUN[boxKubun] + 'の箱なので入れていません';
+}
+
 const KIND = { M: '月次', I: '所得', K: '確申', S: '償却', Z: '継続', X: 'その他' };
 const KIND_FULL = { M: '月次資料', I: '所得税関係資料', K: '確定申告資料', S: '償却資産', Z: '継続管理資料', X: 'その他' };
 const KIND_ORDER = ['M', 'I', 'K', 'S', 'Z', 'X'];
@@ -136,7 +151,7 @@ let cfg = null;
 try { cfg = JSON.parse(lsGet('deskScan.cfg') || 'null'); } catch (e) {}
 
 function parseBox(v) {
-  const m = /^([CP])-(\d{4})-(\d{1,4})$/.exec(String(v || ''));
+  const m = /^([CPSED])-(\d{4})-(\d{1,4})$/.exec(String(v || ''));
   return m ? { kubun: m[1], year: Number(m[2]), no: Number(m[3]) } : null;
 }
 function api(action, extra) {
@@ -168,7 +183,7 @@ function staff() { return lsGet('deskScan.staff') || ''; }
 // 前回の顧問先一覧が端末にあれば、それですぐ始める（最新は裏で取り直す）
 function applyInit(res) {
   clients = {};
-  res.clients.forEach(c => { clients[c[0]] = { code: c[0], name: c[1], kubun: c[2], settle: c[3] || 12 }; });
+  res.clients.forEach(c => { clients[c[0]] = { code: c[0], name: c[1], kubun: c[2], settle: c[3] || 12, active: c[4] !== 0, kakuteiOnly: c[5] === 1 }; });
   staffList = res.staff;
 }
 if (!cfg) {
@@ -244,10 +259,10 @@ function startCamera() {
 // QRの読み分け（Desk本体と同じ）。区切りは英数字と「-」以外なら何でも受ける
 function parseCode(raw) {
   const t = String(raw || '').normalize('NFKC').trim();
-  let m = /b[=^~]([CP])-(\d{4})-(\d{1,4})/i.exec(t);
+  let m = /b[=^~]([CPSED])-(\d{4})-(\d{1,4})/i.exec(t);
   if (m) return { type: 'box', kubun: m[1].toUpperCase(), year: Number(m[2]), no: Number(m[3]) };
   const S = '[^0-9A-Za-z-]';
-  m = new RegExp('^B' + S + '([CP])' + S + '(\\d{4})' + S + '(\\d{1,4})$', 'i').exec(t);
+  m = new RegExp('^B' + S + '([CPSED])' + S + '(\\d{4})' + S + '(\\d{1,4})$', 'i').exec(t);
   if (m) return { type: 'box', kubun: m[1].toUpperCase(), year: Number(m[2]), no: Number(m[3]) };
   m = new RegExp('^E' + S + '(\\d{3,5})' + S + '(\\d{4}|-)' + S + '([MIKSZX])' + S + '(\\d{1,3})$', 'i').exec(t);
   if (m) return { type: 'env', code: Number(m[1]), year: m[2] === '-' ? null : Number(m[2]), kind: m[3].toUpperCase(), seq: Number(m[4]) };
@@ -345,6 +360,14 @@ function loadRegistered() {
   registered = {};
   api('box', { kubun: draft.kubun, year: draft.year, no: draft.no }).then(res => {
     if (!res.success) return;
+    // 顧問先専用の箱は、その先のコードを覚えて箱の名前にも出す
+    if (draft.kubun === 'D') {
+      draft.client = res.client || 0;
+      saveDraft();
+      const c = clients[draft.client];
+      $('boxName').textContent = boxName(draft.kubun, draft.year, draft.no) + (c ? '（' + c.code + ' ' + c.name + '）' : '');
+      if (!res.exists) result('ng', 'この専用箱はDeskに登録されていません。PCの「箱ラベル印刷」で作った箱のQRか確かめてください');
+    }
     res.items.forEach(it => { (registered[it.code] = registered[it.code] || []).push(it.kind); });
     renderList();
     const n = Object.keys(registered).length;
@@ -396,10 +419,8 @@ function onEnvelope(p) {
   if (!Object.keys(clients).length) { lastText = ''; return result('warn', '顧問先の一覧を読み込み中です。少し待ってからもう一度かざしてください'); }
   if (!c) { beep(false); return result('ng', code + ' は顧問先マスタにありません'); }
   if (!KIND[kind]) { beep(false); return result('ng', '封筒の種類が読めませんでした'); }
-  if (c.kubun !== draft.kubun) {
-    beep(false);
-    return result('ng', code + ' ' + c.name + ' は' + KUBUN[c.kubun] + 'です。この箱は' + KUBUN[draft.kubun] + 'の箱なので入れていません');
-  }
+  if (draft.kubun === 'D' && !draft.client) { lastText = ''; return result('warn', '専用箱の顧問先を読み込み中です。少し待ってからもう一度かざしてください'); }
+  if (!boxAccepts(draft.kubun, c, draft.client)) { beep(false); return result('ng', boxRejectMsg(draft.kubun, c)); }
   const okYears = envBoxYears(c, kind, year === '-' ? null : Number(year));
   if (okYears && okYears.indexOf(draft.year) < 0) {
     beep(false);
