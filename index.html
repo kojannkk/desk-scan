@@ -76,6 +76,11 @@
       <div id="reader"></div>
       <div class="res info" id="res">箱に貼ったラベルのQRをカメラに向けてください</div>
     </div>
+    <div class="card hidden" id="recvCard">
+      <h2>受付した封筒</h2>
+      <div class="muted" id="recvPending"></div>
+      <div id="recvLog"></div>
+    </div>
     <div class="card hidden" id="listCard">
       <h2>この箱に入れる封筒</h2>
       <div id="list"></div>
@@ -201,6 +206,13 @@ function begin() {
   renderWho();
   $('scrScan').classList.remove('hidden');
   startCamera();
+  if (queue.length) { $('recvCard').classList.remove('hidden'); flushQueue(); }
+  if (RECV) {
+    $('boxName').textContent = '返送受付';
+    $('recvCard').classList.remove('hidden');
+    result('info', '届いた封筒の返信用ラベルのQRをかざしてください');
+    return;
+  }
   if (startBox && !(draft && draft.kubun === startBox.kubun && draft.year === startBox.year && draft.no === startBox.no)) {
     setBox(startBox);
   } else if (draft) {
@@ -218,18 +230,75 @@ function startCamera() {
     .catch(err => result('ng', 'カメラを起動できませんでした。ブラウザの設定でカメラを許可してください（' + (err && err.message || err) + '）'));
 }
 
+// QRの読み分け（Desk本体と同じ）。区切りは英数字と「-」以外なら何でも受ける
+function parseCode(raw) {
+  const t = String(raw || '').normalize('NFKC').trim();
+  let m = /b[=^~]([CP])-(\d{4})-(\d{1,4})/i.exec(t);
+  if (m) return { type: 'box', kubun: m[1].toUpperCase(), year: Number(m[2]), no: Number(m[3]) };
+  const S = '[^0-9A-Za-z-]';
+  m = new RegExp('^B' + S + '([CP])' + S + '(\\d{4})' + S + '(\\d{1,4})$', 'i').exec(t);
+  if (m) return { type: 'box', kubun: m[1].toUpperCase(), year: Number(m[2]), no: Number(m[3]) };
+  m = new RegExp('^E' + S + '(\\d{3,5})' + S + '(\\d{4}|-)' + S + '([MIKSZX])' + S + '(\\d{1,3})$', 'i').exec(t);
+  if (m) return { type: 'env', code: Number(m[1]), year: m[2] === '-' ? null : Number(m[2]), kind: m[3].toUpperCase(), seq: Number(m[4]) };
+  m = new RegExp('^([AR])' + S + '(\\d{1,6})' + S + '(\\d{3,5})$', 'i').exec(t);
+  if (m) return { type: m[1].toUpperCase() === 'A' ? 'send' : 'reply', sendId: Number(m[2]), code: Number(m[3]) };
+  return null;
+}
 function onScan(text) {
   const now = Date.now();
   if (busy || (text === lastText && now - lastAt < 2500)) return;   // 同じQRを読み続けない
   lastText = text; lastAt = now;
-  const m = /[?&]b=([CP]-\d{4}-\d{1,4})/.exec(text);
-  if (m) return onBox(parseBox(m[1]));
-  const p = String(text).split('|');
-  if (p[0] === 'B' && p.length === 4) return onBox({ kubun: p[1], year: Number(p[2]), no: Number(p[3]) });
-  if (p[0] === 'E' && p.length === 5) return onEnvelope(p);
+  const p = parseCode(text);
+  if (p && p.type === 'box') return onBox(p);
+  if (p && p.type === 'env') return onEnvelope(['E', p.code, p.year === null ? '-' : String(p.year), p.kind, p.seq]);
+  if (p && (p.type === 'send' || p.type === 'reply')) return onLabel(p);
   beep(false);
-  result('ng', 'Deskの箱・封筒のQRではありません');
+  result('ng', 'Deskの箱・封筒・宛名ラベルのQRではありません');
 }
+
+// ---------- 返送受付（宛名ラベル） ----------
+// 1通読むごとにすぐ記録する。送れなかった分は端末に残して、あとで送り直す
+const RECV = new URLSearchParams(location.search).get('m') === 'recv';
+let queue = [];
+try { queue = JSON.parse(lsGet('deskScan.queue') || '[]'); } catch (e) { queue = []; }
+let flushing = false;
+function saveQueue() { lsSet('deskScan.queue', JSON.stringify(queue)); }
+function onLabel(p) {
+  beep(true);
+  const c = clients[p.code] || { name: '' };
+  queue.push({ type: p.type, sendId: p.sendId, code: p.code, staff: staff() });
+  saveQueue();
+  $('recvCard').classList.remove('hidden');
+  result('info', p.code + '  ' + c.name + '  ' + (p.type === 'reply' ? '返送' : '発送') + 'を記録しています…');
+  flushQueue();
+}
+function flushQueue() {
+  $('recvPending').textContent = queue.length ? '送信待ち ' + queue.length + '件' : '';
+  if (flushing || !queue.length || !cfg) return;
+  flushing = true;
+  const q = queue[0];
+  const c = clients[q.code] || { name: '' };
+  const label = q.type === 'reply' ? '返送' : '発送';
+  api('sendscan', q).then(res => {
+    flushing = false;
+    queue.shift();
+    saveQueue();
+    if (!res.success) { beep(false); recvLog('ng', q.code + ' ' + c.name + ': ' + res.error); result('ng', q.code + ' ' + c.name + ': ' + res.error); }
+    else if (res.status === 'already') { recvLog('warn', q.code + '  ' + c.name + '  ' + res.sendName + ' は' + label + '受付済み'); result('warn', q.code + '  ' + c.name + ' は' + label + '受付済みです'); }
+    else { recvLog('ok', q.code + '  ' + c.name + '  ' + res.sendName + ' ' + label + '受付'); $('res').className = 'res ok'; $('res').innerHTML = '<div class="nm">' + q.code + '  ' + esc(c.name) + '</div>' + esc(res.sendName) + ' を' + label + '受付しました'; }
+    flushQueue();
+  }).catch(() => {
+    flushing = false;
+    $('recvPending').textContent = '送信待ち ' + queue.length + '件（電波が戻ったら自動で送ります）';
+    setTimeout(flushQueue, 10000);
+  });
+}
+function recvLog(type, text) {
+  $('recvLog').insertAdjacentHTML('afterbegin', '<div class="res ' + type + '" style="margin-top:6px;min-height:0">' + new Date().toTimeString().slice(0, 5) + '  ' + esc(text) + '</div>');
+  const items = $('recvLog').children;
+  while (items.length > 30) items[items.length - 1].remove();
+}
+window.addEventListener('online', flushQueue);
 
 // ---------- 箱 ----------
 function onBox(b) {
