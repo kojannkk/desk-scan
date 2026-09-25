@@ -120,6 +120,7 @@ function boxName(k, y, no) { return KUBUN[k] + yl(y) + '年度' + circled(no); }
 // ---------- 設定（# から受け取る） ----------
 const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
 if (hash.get('d') && hash.get('k')) lsSet('deskScan.cfg', JSON.stringify({ d: hash.get('d'), k: hash.get('k') }));
+if (hash.get('s')) lsSet('deskScan.staff', hash.get('s'));   // Deskで選んだ担当者をそのまま使う
 const startBox = parseBox(hash.get('b') || new URLSearchParams(location.search).get('b'));
 if (location.hash) history.replaceState(null, '', location.pathname);   // 合言葉を画面のURLに残さない
 let cfg = null;
