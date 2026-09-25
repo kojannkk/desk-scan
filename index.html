@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Desk 読み取り</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --navy: #1a2744; --gold: #c9a84c; --bg: #f4f5f8; --line: #dde1ea; --text: #1f2430; --muted: #6b7385;
+    --green: #1e9e57; --green-bg: #e6f6ed; --red: #d93a3a; --red-bg: #fdeaea; --warn: #a26b00; --warn-bg: #fff4dc;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif; background: var(--bg); color: var(--text); font-size: 15px; }
+  button { font: inherit; cursor: pointer; }
+  .hidden { display: none !important; }
+  header { background: var(--navy); color: #fff; padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+  header .logo { color: var(--gold); font-weight: 700; font-size: 17px; }
+  header .who { margin-left: auto; font-size: 13px; opacity: .9; }
+  header .who a { color: var(--gold); margin-left: 6px; text-decoration: underline; cursor: pointer; }
+  .wrap { padding: 12px 14px 120px; max-width: 560px; margin: 0 auto; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .btn { padding: 13px 16px; border-radius: 8px; border: 1px solid var(--line); background: #fff; font-weight: 700; }
+  .btn.primary { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .btn.gold { background: var(--gold); color: var(--navy); border-color: var(--gold); }
+  .btn.block { width: 100%; }
+  .btn:disabled { opacity: .45; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .grid button { padding: 14px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-weight: 600; }
+  #reader { width: 100%; border-radius: 10px; overflow: hidden; background: #000; min-height: 220px; }
+  #reader video { width: 100% !important; display: block; }
+  .boxbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .boxbar .name { font-size: 18px; font-weight: 700; }
+  .boxbar .count { margin-left: auto; background: var(--green-bg); color: var(--green); padding: 4px 10px; border-radius: 12px; font-weight: 700; font-size: 13px; white-space: nowrap; }
+  .res { border-radius: 8px; padding: 10px 12px; margin-top: 10px; font-weight: 600; min-height: 46px; }
+  .res.ok { background: var(--green-bg); color: var(--green); }
+  .res.ok .nm { font-size: 20px; color: var(--text); font-weight: 700; }
+  .res.ng { background: var(--red-bg); color: var(--red); font-weight: 700; }
+  .res.warn { background: var(--warn-bg); color: var(--warn); }
+  .res.info { background: #eef2fb; color: #2f5fb3; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .row .code { font-weight: 700; width: 46px; font-variant-numeric: tabular-nums; }
+  .row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .kd { font-size: 12px; color: var(--green); font-weight: 700; white-space: nowrap; }
+  .row .kd.reg { color: #2f5fb3; }
+  .row .x { border: none; background: none; color: var(--red); font-size: 18px; padding: 0 4px; }
+  .bottom { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 8px; }
+  .bottom .btn { flex: 1; }
+  .msg { padding: 12px; border-radius: 8px; font-weight: 700; margin-bottom: 10px; }
+  .msg.ok { background: var(--green-bg); color: var(--green); }
+  .msg.ng { background: var(--red-bg); color: var(--red); }
+</style>
+</head>
+<body>
+<header><span class="logo">Desk 読み取り</span><span class="who" id="who"></span></header>
+<div class="wrap">
+  <div id="noConfig" class="card hidden">
+    <h2>Deskから開いてください</h2>
+    <div class="muted">このページは、Deskのスマホ画面にある「カメラで読み取る」ボタンから開くと使えるようになります。一度開けば、この端末では次からそのまま使えます。</div>
+  </div>
+  <div id="loading" class="card muted">読み込み中…</div>
+  <div id="loadError" class="card hidden"></div>
+
+  <div id="scrStaff" class="card hidden">
+    <h2>担当者を選んでください</h2>
+    <div class="grid" id="staffGrid"></div>
+  </div>
+
+  <div id="scrScan" class="hidden">
+    <div class="card">
+      <div class="boxbar"><span class="name" id="boxName">箱のQRを読んでください</span><span class="count hidden" id="count"></span></div>
+      <div id="reader"></div>
+      <div class="res info" id="res">箱に貼ったラベルのQRをカメラに向けてください</div>
+    </div>
+    <div class="card hidden" id="listCard">
+      <h2>この箱に入れる封筒</h2>
+      <div id="list"></div>
+    </div>
+  </div>
+
+  <div id="scrDone" class="card hidden">
+    <div class="msg ok" id="doneMsg"></div>
+    <button class="btn gold block" onclick="nextBox()">次の箱を読む</button>
+  </div>
+</div>
+<div class="bottom hidden" id="bottom">
+  <button class="btn" onclick="changeBox()">箱を変える</button>
+  <button class="btn primary" id="sendBtn" onclick="send()" disabled>送信</button>
+</div>
+
+<script>
+// ============================================================
+// Desk 読み取りページ
+//   Deskの場所（デプロイID）と合言葉は、Deskから開いたときの # で受け取り、この端末にだけ保存する。
+//   このページ自体には顧問先の情報もDeskのURLも入れていない。
+// ============================================================
+const KUBUN = { C: '法人', P: '個人' };
+const KIND = { M: '月次', I: '所得', K: '確申', S: '償却', Z: '継続', X: 'その他' };
+const KIND_FULL = { M: '月次資料', I: '所得税関係資料', K: '確定申告資料', S: '償却資産', Z: '継続管理資料', X: 'その他' };
+const KIND_ORDER = ['M', 'I', 'K', 'S', 'Z', 'X'];
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+function wareki(y) { return y >= 2019 ? '令和' + (y === 2019 ? '元' : y - 2018) : '平成' + (y - 1988); }
+function yl(y) { return y + '（' + wareki(y) + '）'; }
+function circled(n) {
+  if (n >= 1 && n <= 20) return String.fromCharCode(0x2460 + n - 1);
+  if (n >= 21 && n <= 35) return String.fromCharCode(0x3251 + n - 21);
+  if (n >= 36 && n <= 50) return String.fromCharCode(0x32B1 + n - 36);
+  return '(' + n + ')';
+}
+function boxName(k, y, no) { return KUBUN[k] + yl(y) + '年度' + circled(no); }
+
+// ---------- 設定（# から受け取る） ----------
+const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+if (hash.get('d') && hash.get('k')) lsSet('deskScan.cfg', JSON.stringify({ d: hash.get('d'), k: hash.get('k') }));
+const startBox = parseBox(hash.get('b') || new URLSearchParams(location.search).get('b'));
+if (location.hash) history.replaceState(null, '', location.pathname);   // 合言葉を画面のURLに残さない
+let cfg = null;
+try { cfg = JSON.parse(lsGet('deskScan.cfg') || 'null'); } catch (e) {}
+
+function parseBox(v) {
+  const m = /^([CP])-(\d{4})-(\d{1,4})$/.exec(String(v || ''));
+  return m ? { kubun: m[1], year: Number(m[2]), no: Number(m[3]) } : null;
+}
+function api(action, extra) {
+  const url = 'https://script.google.com/macros/s/' + cfg.d + '/exec';
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },   // プリフライトを起こさない形で送る
+    body: JSON.stringify(Object.assign({ key: cfg.k, action: action }, extra || {}))
+  }).then(r => r.json());
+}
+
+// ---------- 状態 ----------
+let clients = {}, staffList = [];
+let draft = null;   // { token, staff, kubun, year, no, items: {code: [kinds]}, order: [code] }
+let registered = {}; // この箱に登録済み { code: [kinds] }
+let scanner = null, lastText = '', lastAt = 0, busy = false;
+
+function saveDraft() { if (draft) lsSet('deskScan.draft', JSON.stringify(draft)); }
+function staff() { return lsGet('deskScan.staff') || ''; }
+
+// ---------- 起動 ----------
+if (!cfg) {
+  $('loading').classList.add('hidden');
+  $('noConfig').classList.remove('hidden');
+} else {
+  api('init').then(res => {
+    $('loading').classList.add('hidden');
+    if (!res.success) return loadError(res.error);
+    res.clients.forEach(c => clients[c.code] = c);
+    staffList = res.staff;
+    try { draft = JSON.parse(lsGet('deskScan.draft') || 'null'); } catch (e) { draft = null; }
+    if (!staff()) return showStaff();
+    begin();
+  }).catch(e => { $('loading').classList.add('hidden'); loadError(e.message); });
+}
+function loadError(msg) {
+  $('loadError').classList.remove('hidden');
+  $('loadError').innerHTML = '<div class="msg ng">Deskに接続できませんでした: ' + esc(msg) + '</div><button class="btn block" onclick="location.reload()">開き直す</button>';
+}
+function renderWho() {
+  $('who').innerHTML = staff() ? '担当: ' + esc(staff()) + '<a onclick="showStaff()">変更</a>' : '';
+}
+function showStaff() {
+  $('scrScan').classList.add('hidden');
+  $('scrStaff').classList.remove('hidden');
+  $('staffGrid').innerHTML = staffList.map(n => '<button data-n="' + esc(n) + '" onclick="pickStaff(this.dataset.n)">' + esc(n) + '</button>').join('');
+}
+function pickStaff(n) {
+  lsSet('deskScan.staff', n);
+  if (draft) { draft.staff = n; saveDraft(); }
+  $('scrStaff').classList.add('hidden');
+  begin();
+}
+function begin() {
+  renderWho();
+  $('scrScan').classList.remove('hidden');
+  startCamera();
+  if (startBox && !(draft && draft.kubun === startBox.kubun && draft.year === startBox.year && draft.no === startBox.no)) {
+    setBox(startBox);
+  } else if (draft) {
+    showBox(Object.keys(draft.items).length ? '未送信の読み取りを再開しました' : '');
+    loadRegistered();
+  }
+}
+
+// ---------- カメラ ----------
+function startCamera() {
+  if (scanner) return;
+  if (typeof Html5Qrcode === 'undefined') { result('ng', '読み取りの部品が読み込めませんでした。開き直してください'); return; }
+  scanner = new Html5Qrcode('reader');
+  scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 220, height: 220 } }, onScan, () => {})
+    .catch(err => result('ng', 'カメラを起動できませんでした。ブラウザの設定でカメラを許可してください（' + (err && err.message || err) + '）'));
+}
+
+function onScan(text) {
+  const now = Date.now();
+  if (busy || (text === lastText && now - lastAt < 2500)) return;   // 同じQRを読み続けない
+  lastText = text; lastAt = now;
+  const m = /[?&]b=([CP]-\d{4}-\d{1,4})/.exec(text);
+  if (m) return onBox(parseBox(m[1]));
+  const p = String(text).split('|');
+  if (p[0] === 'B' && p.length === 4) return onBox({ kubun: p[1], year: Number(p[2]), no: Number(p[3]) });
+  if (p[0] === 'E' && p.length === 5) return onEnvelope(p);
+  beep(false);
+  result('ng', 'Deskの箱・封筒のQRではありません');
+}
+
+// ---------- 箱 ----------
+function onBox(b) {
+  if (!b || !KUBUN[b.kubun]) { beep(false); return result('ng', '箱のQRが読めませんでした'); }
+  if (draft && draft.kubun === b.kubun && draft.year === b.year && draft.no === b.no) { return result('warn', 'この箱を読み取り中です'); }
+  if (draft && Object.keys(draft.items).length) {
+    beep(false);
+    return result('ng', '別の箱（' + boxName(b.kubun, b.year, b.no) + '）のQRです。今の箱を送信してから読んでください');
+  }
+  beep(true);
+  setBox(b);
+}
+function setBox(b) {
+  draft = { token: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10), staff: staff(),
+            kubun: b.kubun, year: b.year, no: b.no, items: {}, order: [] };
+  saveDraft();
+  showBox('');
+  loadRegistered();
+}
+function loadRegistered() {
+  registered = {};
+  api('box', { kubun: draft.kubun, year: draft.year, no: draft.no }).then(res => {
+    if (!res.success) return;
+    res.items.forEach(it => { (registered[it.code] = registered[it.code] || []).push(it.kind); });
+    renderList();
+    const n = Object.keys(registered).length;
+    if (n && !Object.keys(draft.items).length) result('info', 'この箱には登録済みの封筒が ' + n + '件あります。続けて封筒を読むと追記されます');
+  });
+}
+function showBox(msg) {
+  $('boxName').textContent = boxName(draft.kubun, draft.year, draft.no);
+  $('bottom').classList.remove('hidden');
+  $('listCard').classList.remove('hidden');
+  renderList();
+  result('info', msg || '封筒のQRを次々にカメラに向けてください');
+}
+function changeBox() {
+  if (draft && Object.keys(draft.items).length && !confirm('未送信の ' + Object.keys(draft.items).length + '件を破棄して、別の箱を読みますか？')) return;
+  draft = null;
+  lsDel('deskScan.draft');
+  $('boxName').textContent = '箱のQRを読んでください';
+  $('count').classList.add('hidden');
+  $('listCard').classList.add('hidden');
+  $('bottom').classList.add('hidden');
+  result('info', '箱に貼ったラベルのQRをカメラに向けてください');
+}
+
+// ---------- 封筒 ----------
+function onEnvelope(p) {
+  if (!draft) { beep(false); return result('ng', '先に箱のQRを読んでください'); }
+  const code = Number(p[1]), year = p[2], kind = p[3];
+  const c = clients[code];
+  if (!c) { beep(false); return result('ng', code + ' は顧問先マスタにありません'); }
+  if (!KIND[kind]) { beep(false); return result('ng', '封筒の種類が読めませんでした'); }
+  if (c.kubun !== draft.kubun) {
+    beep(false);
+    return result('ng', code + ' ' + c.name + ' は' + KUBUN[c.kubun] + 'です。この箱は' + KUBUN[draft.kubun] + 'の箱なので入れていません');
+  }
+  if (year !== '-' && Number(year) !== draft.year) {
+    beep(false);
+    return result('ng', code + ' ' + c.name + ' の封筒は' + yl(Number(year)) + '年度です。この箱は' + yl(draft.year) + '年度なので入れていません');
+  }
+  const kinds = draft.items[code] || [];
+  if (kinds.indexOf(kind) >= 0) return result('warn', code + ' ' + c.name + '（' + KIND[kind] + '）は読み取り済みです');
+  draft.items[code] = KIND_ORDER.filter(k => k === kind || kinds.indexOf(k) >= 0);
+  draft.order = draft.order.filter(x => x !== code).concat([code]);
+  saveDraft();
+  beep(true);
+  $('res').className = 'res ok';
+  $('res').innerHTML = '<div class="nm">' + code + '  ' + esc(c.name) + '</div>' + esc(KIND_FULL[kind]) + ' を追加';
+  renderList();
+}
+function removeItem(code) {
+  const c = clients[code] || { name: '' };
+  if (!confirm(code + ' ' + c.name + ' を外しますか？')) return;
+  delete draft.items[code];
+  draft.order = draft.order.filter(x => x !== code);
+  saveDraft();
+  renderList();
+}
+function renderList() {
+  if (!draft) return;
+  const codes = draft.order.slice().reverse();   // 新しく読んだものが上
+  const regOnly = Object.keys(registered).map(Number).filter(c => !draft.items[c]);
+  const n = codes.length;
+  $('count').textContent = '読み取り ' + n + '件';
+  $('count').classList.toggle('hidden', !n);
+  $('sendBtn').disabled = !n;
+  const kt = ks => KIND_ORDER.filter(k => ks.indexOf(k) >= 0).map(k => KIND[k]).join('・');
+  $('list').innerHTML = (n ? codes.map(code => {
+    const c = clients[code] || { name: '' };
+    return '<div class="row"><span class="code">' + code + '</span><span class="nm">' + esc(c.name) + '</span><span class="kd">' + esc(kt(draft.items[code])) +
+      '</span><button class="x" onclick="removeItem(' + code + ')">✕</button></div>';
+  }).join('') : '<div class="muted">まだありません</div>') +
+  (regOnly.length ? '<div class="muted" style="margin-top:12px">登録済み（' + regOnly.length + '件）</div>' + regOnly.sort((a, b) => a - b).map(code => {
+    const c = clients[code] || { name: '' };
+    return '<div class="row"><span class="code">' + code + '</span><span class="nm">' + esc(c.name) + '</span><span class="kd reg">' + esc(kt(registered[code])) + '</span></div>';
+  }).join('') : '');
+}
+
+// ---------- 送信 ----------
+function send() {
+  if (!draft || busy) return;
+  const n = Object.keys(draft.items).length;
+  if (!confirm(boxName(draft.kubun, draft.year, draft.no) + ' に ' + n + '件を登録します')) return;
+  busy = true;
+  $('sendBtn').disabled = true;
+  $('sendBtn').textContent = '送信中…';
+  const payload = { token: draft.token, staff: draft.staff || staff(), kubun: draft.kubun, year: draft.year, boxNo: draft.no, location: '',
+                    items: Object.keys(draft.items).map(code => ({ code: Number(code), kinds: draft.items[code] })) };
+  const fail = msg => {
+    busy = false;
+    $('sendBtn').disabled = false;
+    $('sendBtn').textContent = '再送する';
+    beep(false);
+    result('ng', '送信できませんでした。読み取った内容はこの端末に残っています。' + msg);
+  };
+  api('submit', { payload: payload }).then(res => {
+    if (!res.success) return fail(res.error || '');
+    busy = false;
+    $('sendBtn').textContent = '送信';
+    const name = boxName(draft.kubun, draft.year, draft.no);
+    draft = null;
+    lsDel('deskScan.draft');
+    $('scrScan').classList.add('hidden');
+    $('bottom').classList.add('hidden');
+    $('doneMsg').textContent = name + ' に ' + n + '件を登録しました';
+    $('scrDone').classList.remove('hidden');
+  }).catch(e => fail(e.message));
+}
+function nextBox() {
+  $('scrDone').classList.add('hidden');
+  $('scrScan').classList.remove('hidden');
+  changeBox();
+}
+
+// ---------- 表示・音 ----------
+function result(type, msg) {
+  $('res').className = 'res ' + type;
+  $('res').textContent = msg;
+}
+let actx = null;
+function beep(ok) {
+  try { if (navigator.vibrate) navigator.vibrate(ok ? 60 : [80, 60, 80]); } catch (e) {}
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.value = ok ? 1320 : 330;
+    g.gain.value = 0.08;
+    o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime + (ok ? 0.08 : 0.25));
+  } catch (e) {}
+}
+// iPhoneは画面に触れるまで音が出ないので、最初のタップで音を使えるようにする
+document.addEventListener('touchstart', () => { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {} }, { once: true });
+</script>
+</body>
+</html>
