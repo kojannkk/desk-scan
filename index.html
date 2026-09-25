@@ -158,7 +158,7 @@ function staff() { return lsGet('deskScan.staff') || ''; }
 // 前回の顧問先一覧が端末にあれば、それですぐ始める（最新は裏で取り直す）
 function applyInit(res) {
   clients = {};
-  res.clients.forEach(c => { clients[c[0]] = { code: c[0], name: c[1], kubun: c[2] }; });
+  res.clients.forEach(c => { clients[c[0]] = { code: c[0], name: c[1], kubun: c[2], settle: c[3] || 12 }; });
   staffList = res.staff;
 }
 if (!cfg) {
@@ -346,6 +346,23 @@ function changeBox() {
   result('info', '箱に貼ったラベルのQRをカメラに向けてください');
 }
 
+
+// 封筒の年度 → 入れてよい箱の年度
+//   個人: 暦年そのまま（R6の箱 = 2024年分）
+//   法人の月次: 箱の年度は「前年8月〜その年7月に決算を迎える期」（R6の箱 = 2023年8月期〜2024年7月期）。
+//              封筒の年度は期首の年なので、決算月から決算日の年を出して当てはめる
+//   法人の所得税など暦年の封筒: どちらの箱に入れるか運用で決まるので、その年と翌年の箱を受ける
+function envBoxYears(c, kind, y) {
+  if (y === null || y === undefined) return null;   // 年の無い封筒（償却資産・継続管理）はどの箱でも可
+  if (c.kubun !== 'C') return [y];
+  if (kind === 'M') {
+    const sm = c.settle || 12;
+    const endY = sm === 12 ? y : y + 1;
+    return [sm <= 7 ? endY : endY + 1];
+  }
+  return [y, y + 1];
+}
+
 // ---------- 封筒 ----------
 function onEnvelope(p) {
   if (!draft) { beep(false); return result('ng', '先に箱のQRを読んでください'); }
@@ -358,9 +375,10 @@ function onEnvelope(p) {
     beep(false);
     return result('ng', code + ' ' + c.name + ' は' + KUBUN[c.kubun] + 'です。この箱は' + KUBUN[draft.kubun] + 'の箱なので入れていません');
   }
-  if (year !== '-' && Number(year) !== draft.year) {
+  const okYears = envBoxYears(c, kind, year === '-' ? null : Number(year));
+  if (okYears && okYears.indexOf(draft.year) < 0) {
     beep(false);
-    return result('ng', code + ' ' + c.name + ' の封筒は' + yl(Number(year)) + '年度です。この箱は' + yl(draft.year) + '年度なので入れていません');
+    return result('ng', code + ' ' + c.name + ' の封筒は' + yl(okYears[0]) + '年度の箱に入ります。この箱は' + yl(draft.year) + '年度なので入れていません');
   }
   const kinds = draft.items[code] || [];
   if (kinds.indexOf(kind) >= 0) return result('warn', code + ' ' + c.name + '（' + KIND[kind] + '）は読み取り済みです');
