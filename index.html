@@ -92,6 +92,9 @@
     <button class="btn gold block" onclick="nextBox()">次の箱を読む</button>
   </div>
 </div>
+<div class="bottom hidden" id="modeBottom">
+  <button class="btn primary" onclick="finishMode()">完了</button>
+</div>
 <div class="bottom hidden" id="bottom">
   <button class="btn" onclick="changeBox()">箱を変える</button>
   <button class="btn primary" id="sendBtn" onclick="send()" disabled>送信</button>
@@ -128,7 +131,7 @@ const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
 if (hash.get('d') && hash.get('k')) lsSet('deskScan.cfg', JSON.stringify({ d: hash.get('d'), k: hash.get('k') }));
 if (hash.get('s')) lsSet('deskScan.staff', hash.get('s'));   // Deskで選んだ担当者をそのまま使う
 const startBox = parseBox(hash.get('b') || new URLSearchParams(location.search).get('b'));
-if (location.hash) history.replaceState(null, '', location.pathname);   // 合言葉を画面のURLに残さない
+if (location.hash) history.replaceState(null, '', location.pathname + location.search);   // 合言葉を画面のURLに残さない
 let cfg = null;
 try { cfg = JSON.parse(lsGet('deskScan.cfg') || 'null'); } catch (e) {}
 
@@ -150,6 +153,13 @@ let clients = {}, staffList = [];
 let draft = null;   // { token, staff, kubun, year, no, items: {code: [kinds]}, order: [code] }
 let registered = {}; // この箱に登録済み { code: [kinds] }
 let scanner = null, lastText = '', lastAt = 0, busy = false;
+// 読み取りページの開き方（?m=recv → 返送受付、?m=ship → 発送記録）と、送れていない発送・返送の記録
+const MODE = new URLSearchParams(location.search).get('m') || '';
+const MODE_NAME = new URLSearchParams(location.search).get('n') || '';   // 例: 年末調整2026（この送付を読んでいるか確かめる）
+let doneCount = 0;
+let queue = [];
+try { queue = JSON.parse(lsGet('deskScan.queue') || '[]'); } catch (e) { queue = []; }
+let flushing = false;
 
 function saveDraft() { if (draft) lsSet('deskScan.draft', JSON.stringify(draft)); }
 function staff() { return lsGet('deskScan.staff') || ''; }
@@ -208,7 +218,8 @@ function begin() {
   startCamera();
   if (queue.length) { $('recvCard').classList.remove('hidden'); flushQueue(); }
   if (MODE === 'recv' || MODE === 'ship') {
-    $('boxName').textContent = MODE === 'ship' ? '発送記録' : '返送受付';
+    $('boxName').textContent = (MODE === 'ship' ? '発送記録' : '返送受付') + (MODE_NAME ? '  ' + MODE_NAME : '');
+    $('modeBottom').classList.remove('hidden');
     $('recvCard').classList.remove('hidden');
     result('info', MODE === 'ship' ? '出す封筒の送付用ラベル（宛先がお客さん）のQRをかざしてください' : '届いた封筒の返信用ラベルのQRをかざしてください');
     return;
@@ -259,10 +270,15 @@ function onScan(text) {
 // ---------- 返送受付（宛名ラベル） ----------
 // 1通読むごとにすぐ記録する。送れなかった分は端末に残して、あとで送り直す
 // ?m=recv → 返送受付、?m=ship → 発送記録 として開く（どちらでも送付用・返信用の両方を読める）
-const MODE = new URLSearchParams(location.search).get('m') || '';
-let queue = [];
-try { queue = JSON.parse(lsGet('deskScan.queue') || '[]'); } catch (e) { queue = []; }
-let flushing = false;
+// 完了: 送れていない記録が無いか確かめてから閉じる
+function finishMode() {
+  if (queue.length) {
+    flushQueue();
+    return alert('まだ送れていない記録が ' + queue.length + '件あります。電波のある所で少し待ってから、もう一度「完了」を押してください');
+  }
+  alert('記録 ' + doneCount + '件。すべてDeskに保存されています');
+  backToDesk();
+}
 function saveQueue() { lsSet('deskScan.queue', JSON.stringify(queue)); }
 function onLabel(p) {
   beep(true);
@@ -286,7 +302,13 @@ function flushQueue() {
     saveQueue();
     if (!res.success) { beep(false); recvLog('ng', q.code + ' ' + c.name + ': ' + res.error); result('ng', q.code + ' ' + c.name + ': ' + res.error); }
     else if (res.status === 'already') { recvLog('warn', q.code + '  ' + c.name + '  ' + res.sendName + ' は' + label + '受付済み'); result('warn', q.code + '  ' + c.name + ' は' + label + '受付済みです'); }
-    else { recvLog('ok', q.code + '  ' + c.name + '  ' + res.sendName + ' ' + label + '受付'); $('res').className = 'res ok'; $('res').innerHTML = '<div class="nm">' + q.code + '  ' + esc(c.name) + '</div>' + esc(res.sendName) + ' を' + label + '受付しました'; }
+    else {
+      doneCount++;
+      const other = MODE_NAME && res.sendName !== MODE_NAME;   // 別の送付のラベルを読んだ（記録はその送付に付く）
+      recvLog(other ? 'warn' : 'ok', q.code + '  ' + c.name + '  ' + res.sendName + ' ' + label + '記録' + (other ? '（' + MODE_NAME + ' ではありません）' : ''));
+      $('res').className = 'res ' + (other ? 'warn' : 'ok');
+      $('res').innerHTML = '<div class="nm">' + q.code + '  ' + esc(c.name) + '</div>' + esc(res.sendName) + ' の' + label + 'を記録しました' + (other ? '（' + esc(MODE_NAME) + ' ではないラベルです）' : '');
+    }
     flushQueue();
   }).catch(() => {
     flushing = false;
