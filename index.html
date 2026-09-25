@@ -16,6 +16,7 @@
   button { font: inherit; cursor: pointer; }
   .hidden { display: none !important; }
   header { background: var(--navy); color: #fff; padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+  header .back { background: transparent; border: 1px solid rgba(255,255,255,.45); color: #fff; border-radius: 6px; padding: 4px 10px; font-size: 13px; }
   header .logo { color: var(--gold); font-weight: 700; font-size: 17px; }
   header .who { margin-left: auto; font-size: 13px; opacity: .9; }
   header .who a { color: var(--gold); margin-left: 6px; text-decoration: underline; cursor: pointer; }
@@ -55,7 +56,7 @@
 </style>
 </head>
 <body>
-<header><span class="logo">Desk 読み取り</span><span class="who" id="who"></span></header>
+<header><button class="back" onclick="backToDesk()">‹ 戻る</button><span class="logo">Desk 読み取り</span><span class="who" id="who"></span></header>
 <div class="wrap">
   <div id="noConfig" class="card hidden">
     <h2>Deskから開いてください</h2>
@@ -348,6 +349,17 @@ function nextBox() {
   $('scrDone').classList.add('hidden');
   $('scrScan').classList.remove('hidden');
   changeBox();
+}
+
+// ---------- Deskへ戻る ----------
+// Deskから別タブで開いているので、まずタブを閉じる。閉じられないときはDeskを開く
+function backToDesk() {
+  if (draft && Object.keys(draft.items).length) {
+    if (!confirm('未送信の読み取りが ' + Object.keys(draft.items).length + '件あります（この端末に残ります）。\nDeskに戻りますか？')) return;
+  }
+  try { if (scanner && scanner.isScanning) scanner.stop(); } catch (e) {}
+  window.close();
+  setTimeout(() => { if (cfg) location.href = 'https://script.google.com/macros/s/' + cfg.d + '/exec'; else history.back(); }, 300);
 }
 
 // ---------- 表示・音 ----------
