@@ -112,13 +112,16 @@ function boxAccepts(boxKubun, c, boxClient) {
   if (boxKubun === 'D') return c.code === Number(boxClient);
   if (boxKubun === 'E') return !c.active;
   if (boxKubun === 'S') return !!c.kakuteiOnly;
-  return c.kubun === boxKubun;
+  // 法人・個人の箱には、関与していない先（→終了顧問先の箱）と確定申告のみの先（→確定申告のみの箱）は入れない
+  return c.kubun === boxKubun && c.active && !c.kakuteiOnly;
 }
 function boxRejectMsg(boxKubun, c) {
   const who = c.code + ' ' + c.name;
   if (boxKubun === 'D') return who + ' はこの専用箱の顧問先ではないので入れていません';
   if (boxKubun === 'E') return who + ' は関与中の先です。終了顧問先の箱なので入れていません';
   if (boxKubun === 'S') return who + ' は確定申告のみの先ではありません。この箱は確定申告のみの箱なので入れていません';
+  if (!c.active) return who + ' は関与していない先です。終了顧問先の箱に入れてください';
+  if (c.kakuteiOnly) return who + ' は確定申告のみの先です。確定申告のみの箱に入れてください';
   return who + ' は' + KUBUN[c.kubun] + 'です。この箱は' + KUBUN[boxKubun] + 'の箱なので入れていません';
 }
 
