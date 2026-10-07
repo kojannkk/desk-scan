@@ -110,7 +110,7 @@ const KUBUN = { C: '法人', P: '個人', S: '確定申告のみ', E: '終了顧
 // 箱の区分ごとに、入れてよい先か。法人・個人は顧問先の区分、確定申告のみはF列（か3000番台）、終了顧問先は関与していない先
 function boxAccepts(boxKubun, c, boxClient) {
   if (boxKubun === 'D') return c.code === Number(boxClient);
-  if (boxKubun === 'E') return !c.active;
+  if (boxKubun === 'E') return true;   // 終了顧問先・法人成り: 基本は関与していない先だが、法人成りなどで関与中の先も入れられる
   if (boxKubun === 'S') return !!c.kakuteiOnly;
   // 法人・個人の箱には、関与していない先（→終了顧問先の箱）と確定申告のみの先（→確定申告のみの箱）は入れない
   return c.kubun === boxKubun && c.active && !c.kakuteiOnly;
@@ -435,7 +435,8 @@ function onEnvelope(p) {
   saveDraft();
   beep(true);
   $('res').className = 'res ok';
-  $('res').innerHTML = '<div class="nm">' + code + '  ' + esc(c.name) + '</div>' + esc(KIND_FULL[kind]) + ' を追加';
+  $('res').innerHTML = '<div class="nm">' + code + '  ' + esc(c.name) + '</div>' + esc(KIND_FULL[kind]) + ' を追加' +
+    (draft.kubun === 'E' && c.active ? '（関与中の先です）' : '');
   renderList();
 }
 function removeItem(code) {
